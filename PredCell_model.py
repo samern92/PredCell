@@ -40,23 +40,14 @@ class PredCells(nn.Module):
     def __init__(self, num_layers, total_timesteps):
         self.num_layers = num_layers
         self.total_timesteps = total_timesteps
-##        self.st_units = []
-##        self.err_units = []
+        self.st_units = []
+        self.err_units = []
         self.state_initval = 0
         self.error_initval = 0
         for lyr in range(num_layers):
             self.st_units.append(StateUnit(lyr,0,initializer))
             self.err_units.append(ErrorUnit(lyr,0,initializer))
-##    def initial_pass(self.st_units, self.err_units):
-##        # get initial reconstructions
-##        for lyr in range(num_layers,0,-1):
-##            if lyr == num_layers:
-##                self.st_units[lyr].recon_ = self.st_units[lyr].forward(self.err_units[lyr].BU_err,0)
-##            elif lyr > 0:
-##                self.st_units[lyr].recon_ = self.st_units[lyr].forward(self.err_units[lyr].BU_err,self.err_units[lyr+1].TD_err)
-##            else:
-##                pass # lowest layer does not generate a reconstruction
-            
+
     def forward(self, input_sentence):
         for t in range(self.total_timesteps):
             # input_char at each t is a one-hot character encoding
