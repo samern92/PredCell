@@ -13,13 +13,14 @@ class StateUnit(nn.Module):
         self.state_ = st_initializer.sample() # the idea is to sample from a distribution
         self.recon_ = 0 # reconstructions at all other time points will be determined by the state
         self.V = np.random.uniform(-1,1,size = (3,3)) # figure out size?
+        
     def forward(self, BU_err, TD_err):
         self.timestep += 1
         if isTopLayer:
             self.state_ = nn.LSTM(self.state_, BU_err)
         else:
             self.state_ = nn.LSTM(self.state_, BU_err, TD_err)
-        self.recon_ = self.V * self.state_
+        self.recon_ = self.V * self.state_ # this is a linear map. Should we use nn.Linear?
 
         
 class ErrorUnit(nn.Module):
@@ -33,7 +34,7 @@ class ErrorUnit(nn.Module):
     def forward(self, state_, recon_):
         self.timestep += 1
         self.TD_err = np.abs(state_ - recon_)
-        self.BU_err = self.W * self.TD_err
+        self.BU_err = self.W * self.TD_err # this is a linear map. Should we use nn.Linear?
     def get_timestep():
         return self.timestep
         
