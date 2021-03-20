@@ -1,26 +1,30 @@
-# Authors - Samer Nour Eddine (snoure01@tufts.edu), Apurva Kalia (apurva.kalia@tufts.edu)
-### IN PROGRESS
+''' Authors - Samer Nour Eddine (snoure01@tufts.edu), Apurva Kalia (apurva.kalia@tufts.edu)
+IN PROGRESS
+
+Is it possible to build this entirely with pytorch?
+e.g., I don't know if pytorch can compute the gradient of np.abs(state_ - recon_); it probably should be able to.
+'''
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
+import autograd.numpy as np # compute gradients of all numpy functions
 
 class StateUnit(nn.Module):
-    def __init__(self, layer_level, timestep, initializer,isTopLayer = False):
+    def __init__(self, layer_level, timestep, isTopLayer = False):
         super().__init__()
         self.layer_level = layer_level
         self.timestep = timestep
-        self.state_ = st_initializer.sample() # the idea is to sample from a distribution
-        self.recon_ = 0 # reconstructions at all other time points will be determined by the state
-        self.V = np.random.uniform(-1,1,size = (3,3)) # figure out size?
+        self.state_ = np.random.uniform(-1,1,size = (thislayer_dim,1)) # the idea is to sample from some distribution; uniform might not be ideal though
+        self.recon_ = np.zeros(shape = (lowerlayer_dim, 1)) # reconstructions at all other time points will be determined by the state
+        self.V = np.random.uniform(-1,1,size = (lowerlayer_dim,thislayer_dim)) # maps from this layer to the lower layer
         
     def forward(self, BU_err, TD_err):
         self.timestep += 1
         if isTopLayer:
             self.state_ = nn.LSTM(self.state_, BU_err)
         else:
-            self.state_ = nn.LSTM(self.state_, BU_err, TD_err)
-        self.recon_ = self.V * self.state_ # this is a linear map. Should we use nn.Linear?
+            self.state_ = nn.LSTM(self.state_, BU_err, TD_err) # not sure about syntax; should we be concatenating these?
+        self.recon_ = self.V * self.state_ # this is a linear map. Should we use nn.Linear instead of manually defining V?
 
         
 class ErrorUnit(nn.Module):
@@ -28,12 +32,12 @@ class ErrorUnit(nn.Module):
         super().__init__()
         self.layer_level = layer_level
         self.timestep = timestep
-        self.TD_err = err_initializer.sample()
-        self.BU_err = 0
-        self.W = W_initializer.sample() 
+        self.TD_err = np.random.uniform(-1,1,size = (thislayer_dim,1)) 
+        self.BU_err = np.zeros(shape = (higherlayer_dim, 1)) # it shouldn't matter what we initialize this to; it will be determined by TD_err in all other iterations
+        self.W = np.random.uniform(-1,1,size = (higherlayer_dim,thislayer_dim)) # maps up to the next layer
     def forward(self, state_, recon_):
         self.timestep += 1
-        self.TD_err = np.abs(state_ - recon_)
+        self.TD_err = np.abs(state_ - recon_) # is this differentiable? Will it cause issues?
         self.BU_err = self.W * self.TD_err # this is a linear map. Should we use nn.Linear?
     def get_timestep():
         return self.timestep
@@ -56,7 +60,7 @@ class PredCells(nn.Module):
             input_char = input_sentence[t]
             for lyr in range(num_layers):
                 if lyr == 0:
-                    # override the value 
+                    # set the lowest state unit value to the current character 
                     self.st_units[lyr] = input_char
                 else:
                     self.st_units[lyr] = self.st_units[lyr].forward(self.err_units[lyr-1].BU_err, self.err_units[lyr].TD_err)
