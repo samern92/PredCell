@@ -1,3 +1,4 @@
+# Authors - Samer Nour Eddine (snoure01@tufts.edu), Apurva Kalia (apurva.kalia@tufts.edu)
 ### IN PROGRESS
 import torch
 import torch.nn as nn
