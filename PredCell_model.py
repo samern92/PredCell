@@ -50,7 +50,7 @@ class ErrorUnit(nn.Module):
     def get_timestep():
         return self.timestep
         
-class PredCells(nn.Module):
+class PredCells(nn.Module): # does this need to be an nn.Module?
     def __init__(self, num_layers, total_timesteps, hidden_dim):
         self.num_layers = num_layers
         self.total_timesteps = total_timesteps
