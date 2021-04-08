@@ -22,8 +22,8 @@ class StateUnit(nn.Module):
             self.LSTM_ = nn.LSTM(thislayer_dim, thislayer_dim, 1)
         else:
             self.LSTM_ = nn.LSTM((lowerlayer_dim + thislayer_dim), thislayer_dim, 1)
-        self.state_ = np.zeros(shape = (thislayer_dim, 1))
-        self.recon_ = np.zeros(shape = (lowerlayer_dim, 1)) # reconstructions at all other time points will be determined by the state
+        self.state_ = torch.squeeze(torch.tensor(np.zeros(shape = (thislayer_dim, 1))))
+        self.recon_ = torch.squeeze(torch.tensor(np.zeros(shape = (lowerlayer_dim, 1)))) # reconstructions at all other time points will be determined by the state
         self.V = nn.Linear(thislayer_dim,lowerlayer_dim) # maps from this layer to the lower layer
 
     def forward(self, BU_err, TD_err):
@@ -31,7 +31,7 @@ class StateUnit(nn.Module):
         if self.isTopLayer:
             self.state_ = self.LSTM_(BU_err)
         else:
-            self.state_ = self.LSTM_(np.concatenate((BU_err, TD_err), axis = 0)) # not sure about syntax; should we be concatenating these?
+            self.state_ = self.LSTM_(torch.cat((BU_err, TD_err), axis = 0))
         self.recon_ = self.V(self.state_)
     def set_state(self,input_char):
         self.state_ = input_char
@@ -43,13 +43,13 @@ class ErrorUnit(nn.Module):
         super().__init__()
         self.layer_level = layer_level
         self.timestep = timestep
-        self.TD_err = np.zeros(shape = (thislayer_dim, 1)) 
-        self.BU_err = np.zeros(shape = (higherlayer_dim, 1)) # it shouldn't matter what we initialize this to; it will be determined by TD_err in all other iterations
+        self.TD_err = torch.squeeze(torch.tensor(np.zeros(shape = (thislayer_dim, 1))))
+        self.BU_err = torch.squeeze(torch.tensor(np.zeros(shape = (higherlayer_dim, 1)))) # it shouldn't matter what we initialize this to; it will be determined by TD_err in all other iterations
         self.W = nn.Linear(thislayer_dim,higherlayer_dim)# maps up to the next layer
     def forward(self, state_, recon_):
         self.timestep += 1
-        self.TD_err = np.abs(state_ - recon_)
-        self.BU_err = self.W(self.TD_err)
+        self.TD_err = torch.abs(state_ - recon_)
+        self.BU_err = self.W(self.TD_err.float())
     def get_timestep():
         return self.timestep
     def get_TD_err():
@@ -64,10 +64,13 @@ class PredCells(nn.Module): # does this need to be an nn.Module?
         self.err_units = []
         for lyr in range(self.num_layers):
             if lyr == 0:
-                self.st_units.append(StateUnit(lyr, 0, hidden_dim,self.numchars))
+                self.st_units.append(StateUnit(lyr, 0, self.numchars,self.numchars))
                 self.err_units.append(ErrorUnit(lyr, 0, self.numchars, hidden_dim))
             elif lyr < self.num_layers - 1 and lyr > 0:
-                self.st_units.append(StateUnit(lyr, 0, hidden_dim,hidden_dim))
+                if lyr == 1:
+                    self.st_units.append(StateUnit(lyr, 0, hidden_dim,self.numchars))
+                else:
+                    self.st_units.append(StateUnit(lyr, 0, hidden_dim,hidden_dim))
                 self.err_units.append(ErrorUnit(lyr, 0, hidden_dim, hidden_dim))
             else:
                 self.st_units.append(StateUnit(lyr,0,hidden_dim,hidden_dim,isTopLayer = True))
@@ -79,6 +82,8 @@ class PredCells(nn.Module): # does this need to be an nn.Module?
         for t in range(self.total_timesteps):
             # input_char at each t is a one-hot character encoding
             input_char = input_sentence[t] # 56 dim one hot vector
+            input_char = input_char +0.0
+            input_char = torch.from_numpy(input_char)
             for lyr in range(self.num_layers):
                 if lyr == 0:
                     # set the lowest state unit value to the current character
@@ -91,7 +96,7 @@ class PredCells(nn.Module): # does this need to be an nn.Module?
                     self.err_units[lyr].forward(self.st_units[lyr].state_, self.st_units[lyr+1].recon_)
                 else:
                     pass
-                loss += np.sum(self.err_units[lyr].TD_err)
+                loss += torch.sum(self.err_units[lyr].TD_err)
         return loss
                 
                 
