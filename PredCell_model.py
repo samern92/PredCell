@@ -10,7 +10,7 @@ from sklearn import preprocessing
 import keras
 import string
 import io
-
+import pdb
 
 class StateUnit(nn.Module):
     def __init__(self, layer_level, timestep,thislayer_dim,lowerlayer_dim,isTopLayer = False):
@@ -25,7 +25,7 @@ class StateUnit(nn.Module):
         self.state_ = np.zeros(shape = (thislayer_dim, 1))
         self.recon_ = np.zeros(shape = (lowerlayer_dim, 1)) # reconstructions at all other time points will be determined by the state
         self.V = nn.Linear(thislayer_dim,lowerlayer_dim) # maps from this layer to the lower layer
-        
+
     def forward(self, BU_err, TD_err):
         self.timestep += 1
         if self.isTopLayer:
@@ -33,6 +33,9 @@ class StateUnit(nn.Module):
         else:
             self.state_ = self.LSTM_(np.concatenate((BU_err, TD_err), axis = 0)) # not sure about syntax; should we be concatenating these?
         self.recon_ = self.V(self.state_)
+    def set_state(self,input_char):
+        self.state_ = input_char
+        
 
         
 class ErrorUnit(nn.Module):
@@ -49,18 +52,21 @@ class ErrorUnit(nn.Module):
         self.BU_err = self.W(self.TD_err)
     def get_timestep():
         return self.timestep
+    def get_TD_err():
+        return self.TD_err
         
 class PredCells(nn.Module): # does this need to be an nn.Module?
     def __init__(self, num_layers, total_timesteps, hidden_dim):
         self.num_layers = num_layers
+        self.numchars = 56
         self.total_timesteps = total_timesteps
         self.st_units = []
         self.err_units = []
-        for lyr in range(num_layers):
+        for lyr in range(self.num_layers):
             if lyr == 0:
-                self.st_units.append(StateUnit(lyr, 0, hidden_dim,numchars))
-                self.err_units.append(ErrorUnit(lyr, 0, numchars, hidden_dim))
-            elif lyr < num_layers - 1:
+                self.st_units.append(StateUnit(lyr, 0, hidden_dim,self.numchars))
+                self.err_units.append(ErrorUnit(lyr, 0, self.numchars, hidden_dim))
+            elif lyr < self.num_layers - 1 and lyr > 0:
                 self.st_units.append(StateUnit(lyr, 0, hidden_dim,hidden_dim))
                 self.err_units.append(ErrorUnit(lyr, 0, hidden_dim, hidden_dim))
             else:
@@ -69,21 +75,26 @@ class PredCells(nn.Module): # does this need to be an nn.Module?
             
 
     def forward(self, input_sentence):
+        loss = 0
         for t in range(self.total_timesteps):
             # input_char at each t is a one-hot character encoding
             input_char = input_sentence[t] # 56 dim one hot vector
-            for lyr in range(num_layers):
+            for lyr in range(self.num_layers):
                 if lyr == 0:
-                    # set the lowest state unit value to the current character 
-                    self.st_units[lyr] = input_char
+                    # set the lowest state unit value to the current character
+                    self.st_units[lyr].set_state(input_char)
                 else:
                     self.st_units[lyr] = self.st_units[lyr]\
                                          .forward(self.err_units[lyr-1].BU_err\
                                                   , self.err_units[lyr].TD_err)
-                if lyr < num_layers - 1:
+                if lyr < self.num_layers - 1:
                     self.err_units[lyr].forward(self.st_units[lyr].state_, self.st_units[lyr+1].recon_)
                 else:
                     pass
+                loss += np.sum(self.err_units[lyr].TD_err)
+        return loss
+                
+                
     
 
                 
@@ -121,6 +132,23 @@ for i, sentence in enumerate(sentences):
     y[i, char_indices[next_chars[i]]] = 1
 
 #note that this means that y[i] == x[i+1][-3]
+    
+# PredCells(num_layers, total_timesteps, hidden_dim)
+PredCell = PredCells(3, 100, 128)
+trainable_st_params = [p for model in PredCell.st_units for p in model.parameters() if p.requires_grad]
+trainable_err_params = [p for model in PredCell.err_units for p in model.parameters() if p.requires_grad]
+trainable_params = trainable_st_params + trainable_err_params
 
-            
-            
+training_loss = []
+optimizer = torch.optim.Adam(trainable_params)
+num_epochs = 1000
+for epoch in range(num_epochs):
+    for sentence in x:
+        loss = PredCell.forward(sentence)
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+        training_loss.append(loss.detach().item())
+        
+
+
