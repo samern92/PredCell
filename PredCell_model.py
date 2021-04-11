@@ -2,6 +2,9 @@
 IN PROGRESS
 
 '''
+'''
+'''
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -13,15 +16,15 @@ import io
 import pdb
 
 class StateUnit(nn.Module):
-    def __init__(self, layer_level, timestep,thislayer_dim,lowerlayer_dim,isTopLayer = False):
+    def __init__(self, layer_level, timestep,thislayer_dim,lowerlayer_dim,hidden_dim,isTopLayer = False):
         super().__init__()
         self.layer_level = layer_level
         self.timestep = timestep
         self.isTopLayer = isTopLayer
         if self.isTopLayer:
-            self.LSTM_ = nn.LSTM(thislayer_dim, thislayer_dim, 1)
+            self.LSTM_ = nn.LSTM(thislayer_dim, hidden_dim, 1)
         else:
-            self.LSTM_ = nn.LSTM((lowerlayer_dim + thislayer_dim), thislayer_dim, 1)
+            self.LSTM_ = nn.LSTM((lowerlayer_dim + thislayer_dim), hidden_dim, 1)
         self.state_ = torch.squeeze(torch.tensor(np.zeros(shape = (thislayer_dim, 1))))
         self.recon_ = torch.squeeze(torch.tensor(np.zeros(shape = (lowerlayer_dim, 1)))) # reconstructions at all other time points will be determined by the state
         self.V = nn.Linear(thislayer_dim,lowerlayer_dim) # maps from this layer to the lower layer
@@ -29,9 +32,13 @@ class StateUnit(nn.Module):
     def forward(self, BU_err, TD_err):
         self.timestep += 1
         if self.isTopLayer:
-            self.state_ = self.LSTM_(BU_err)
+            tmp = torch.unsqueeze(BU_err,0)
+            tmp = torch.unsqueeze(tmp, 0)
+            self.state_ = self.LSTM_(tmp)
         else:
-            self.state_ = self.LSTM_(torch.cat((BU_err, TD_err), axis = 0))
+            tmp = torch.unsqueeze(torch.cat((BU_err, TD_err), axis = 0),0)
+            tmp = torch.unsqueeze(tmp, 0)            
+            self.state_ = self.LSTM_(tmp)
         self.recon_ = self.V(self.state_)
     def set_state(self,input_char):
         self.state_ = input_char
@@ -62,20 +69,23 @@ class PredCells(nn.Module): # does this need to be an nn.Module?
         self.total_timesteps = total_timesteps
         self.st_units = []
         self.err_units = []
+        self.hidden_dim = hidden_dim
+        isTopLayer = False
         for lyr in range(self.num_layers):
             if lyr == 0:
-                self.st_units.append(StateUnit(lyr, 0, self.numchars,self.numchars))
+                self.st_units.append(StateUnit(lyr, 0, self.numchars,self.numchars, hidden_dim))
                 self.err_units.append(ErrorUnit(lyr, 0, self.numchars, hidden_dim))
             elif lyr < self.num_layers - 1 and lyr > 0:
                 if lyr == 1:
-                    self.st_units.append(StateUnit(lyr, 0, hidden_dim,self.numchars))
+                    self.st_units.append(StateUnit(lyr, 0, hidden_dim,self.numchars, hidden_dim))
                 else:
-                    self.st_units.append(StateUnit(lyr, 0, hidden_dim,hidden_dim))
+                    self.st_units.append(StateUnit(lyr, 0, hidden_dim,hidden_dim, hidden_dim))
                 self.err_units.append(ErrorUnit(lyr, 0, hidden_dim, hidden_dim))
             else:
-                self.st_units.append(StateUnit(lyr,0,hidden_dim,hidden_dim,isTopLayer = True))
+                self.st_units.append(StateUnit(lyr,0,hidden_dim,hidden_dim, hidden_dim, isTopLayer = True))
                 self.err_units.append(ErrorUnit(lyr, 0, hidden_dim, hidden_dim))
-            
+                
+                
 
     def forward(self, input_sentence):
         loss = 0
@@ -89,8 +99,7 @@ class PredCells(nn.Module): # does this need to be an nn.Module?
                     # set the lowest state unit value to the current character
                     self.st_units[lyr].set_state(input_char)
                 else:
-                    self.st_units[lyr] = self.st_units[lyr]\
-                                         .forward(self.err_units[lyr-1].BU_err\
+                    self.st_units[lyr].forward(self.err_units[lyr-1].BU_err\
                                                   , self.err_units[lyr].TD_err)
                 if lyr < self.num_layers - 1:
                     self.err_units[lyr].forward(self.st_units[lyr].state_, self.st_units[lyr+1].recon_)
@@ -113,6 +122,7 @@ with io.open(path, encoding="utf-8") as f:
     text = f.read().lower()
 text = text.replace("\n", " ")  # We remove newlines chars for nicer display
 print("Corpus length:", len(text))
+#text = text[0:50000] #reducing size to test
 
 chars = sorted(list(set(text)))
 print("Total chars:", len(chars))
@@ -139,7 +149,7 @@ for i, sentence in enumerate(sentences):
 #note that this means that y[i] == x[i+1][-3]
     
 # PredCells(num_layers, total_timesteps, hidden_dim)
-PredCell = PredCells(3, 100, 128)
+PredCell = PredCells(3, maxlen, 128)
 trainable_st_params = [p for model in PredCell.st_units for p in model.parameters() if p.requires_grad]
 trainable_err_params = [p for model in PredCell.err_units for p in model.parameters() if p.requires_grad]
 trainable_params = trainable_st_params + trainable_err_params
