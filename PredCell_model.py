@@ -16,15 +16,15 @@ import io
 import pdb
 
 class StateUnit(nn.Module):
-    def __init__(self, layer_level, timestep,thislayer_dim,lowerlayer_dim,hidden_dim,isTopLayer = False):
+    def __init__(self, layer_level, timestep,thislayer_dim,lowerlayer_dim,isTopLayer = False):
         super().__init__()
         self.layer_level = layer_level
         self.timestep = timestep
         self.isTopLayer = isTopLayer
         if self.isTopLayer:
-            self.LSTM_ = nn.LSTM(thislayer_dim, hidden_dim, 1)
+            self.LSTM_ = nn.LSTM(thislayer_dim, thislayer_dim, 1)
         else:
-            self.LSTM_ = nn.LSTM((lowerlayer_dim + thislayer_dim), hidden_dim, 1)
+            self.LSTM_ = nn.LSTM((2 * thislayer_dim), thislayer_dim, 1)
         self.state_ = torch.squeeze(torch.tensor(np.zeros(shape = (thislayer_dim, 1))))
         self.recon_ = torch.squeeze(torch.tensor(np.zeros(shape = (lowerlayer_dim, 1)))) # reconstructions at all other time points will be determined by the state
         self.V = nn.Linear(thislayer_dim,lowerlayer_dim) # maps from this layer to the lower layer
