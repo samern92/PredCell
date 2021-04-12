@@ -34,11 +34,14 @@ class StateUnit(nn.Module):
         if self.isTopLayer:
             tmp = torch.unsqueeze(BU_err,0)
             tmp = torch.unsqueeze(tmp, 0)
-            self.state_ = self.LSTM_(tmp)
+            tmp = torch.tensor(tmp, dtype = torch.float32)
+            self.state_,_ = self.LSTM_(tmp)
         else:
             tmp = torch.unsqueeze(torch.cat((BU_err, TD_err), axis = 0),0)
-            tmp = torch.unsqueeze(tmp, 0)            
-            self.state_ = self.LSTM_(tmp)
+            tmp = torch.unsqueeze(tmp, 0)
+            tmp = torch.tensor(tmp, dtype = torch.float32)
+            temp,_ = self.LSTM_(tmp)
+            self.state_ = torch.squeeze(temp)
         self.recon_ = self.V(self.state_)
     def set_state(self,input_char):
         self.state_ = input_char
@@ -73,16 +76,16 @@ class PredCells(nn.Module): # does this need to be an nn.Module?
         isTopLayer = False
         for lyr in range(self.num_layers):
             if lyr == 0:
-                self.st_units.append(StateUnit(lyr, 0, self.numchars,self.numchars, hidden_dim))
+                self.st_units.append(StateUnit(lyr, 0, self.numchars,self.numchars))
                 self.err_units.append(ErrorUnit(lyr, 0, self.numchars, hidden_dim))
             elif lyr < self.num_layers - 1 and lyr > 0:
                 if lyr == 1:
-                    self.st_units.append(StateUnit(lyr, 0, hidden_dim,self.numchars, hidden_dim))
+                    self.st_units.append(StateUnit(lyr, 0, hidden_dim,self.numchars))
                 else:
-                    self.st_units.append(StateUnit(lyr, 0, hidden_dim,hidden_dim, hidden_dim))
+                    self.st_units.append(StateUnit(lyr, 0, hidden_dim,hidden_dim))
                 self.err_units.append(ErrorUnit(lyr, 0, hidden_dim, hidden_dim))
             else:
-                self.st_units.append(StateUnit(lyr,0,hidden_dim,hidden_dim, hidden_dim, isTopLayer = True))
+                self.st_units.append(StateUnit(lyr,0,hidden_dim,hidden_dim, isTopLayer = True))
                 self.err_units.append(ErrorUnit(lyr, 0, hidden_dim, hidden_dim))
                 
                 
