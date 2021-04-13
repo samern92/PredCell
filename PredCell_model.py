@@ -14,6 +14,7 @@ import keras
 import string
 import io
 import pdb
+from torch import autograd
 
 class StateUnit(nn.Module):
     def __init__(self, layer_level, timestep,thislayer_dim,lowerlayer_dim,isTopLayer = False):
@@ -25,8 +26,8 @@ class StateUnit(nn.Module):
             self.LSTM_ = nn.LSTM(thislayer_dim, thislayer_dim, 1)
         else:
             self.LSTM_ = nn.LSTM((2 * thislayer_dim), thislayer_dim, 1)
-        self.state_ = torch.squeeze(torch.tensor(np.zeros(shape = (thislayer_dim, 1))))
-        self.recon_ = torch.squeeze(torch.tensor(np.zeros(shape = (lowerlayer_dim, 1)))) # reconstructions at all other time points will be determined by the state
+        self.state = torch.squeeze(torch.tensor(np.zeros(shape = (thislayer_dim, 1)), dtype = torch.float32))
+        self.recon = torch.squeeze(torch.tensor(np.zeros(shape = (lowerlayer_dim, 1)), dtype = torch.float32)) # reconstructions at all other time points will be determined by the state
         self.V = nn.Linear(thislayer_dim,lowerlayer_dim) # maps from this layer to the lower layer
 
     def forward(self, BU_err, TD_err):
@@ -34,17 +35,18 @@ class StateUnit(nn.Module):
         if self.isTopLayer:
             tmp = torch.unsqueeze(BU_err,0)
             tmp = torch.unsqueeze(tmp, 0)
-            tmp = torch.tensor(tmp, dtype = torch.float32)
-            self.state_,_ = self.LSTM_(tmp)
+            #tmp = torch.tensor(tmp, dtype = torch.float32)
+            temp, _ = self.LSTM_(tmp)
+            self.state_ = torch.squeeze(temp)
         else:
             tmp = torch.unsqueeze(torch.cat((BU_err, TD_err), axis = 0),0)
             tmp = torch.unsqueeze(tmp, 0)
-            tmp = torch.tensor(tmp, dtype = torch.float32)
-            temp,_ = self.LSTM_(tmp)
-            self.state_ = torch.squeeze(temp)
-        self.recon_ = self.V(self.state_)
+            #tmp = torch.tensor(tmp, dtype = torch.float32)
+            temp, _ = self.LSTM_(tmp)
+            self.state = torch.squeeze(temp)
+        self.recon = self.V(self.state)
     def set_state(self,input_char):
-        self.state_ = input_char
+        self.state = input_char
         
 
         
@@ -53,8 +55,8 @@ class ErrorUnit(nn.Module):
         super().__init__()
         self.layer_level = layer_level
         self.timestep = timestep
-        self.TD_err = torch.squeeze(torch.tensor(np.zeros(shape = (thislayer_dim, 1))))
-        self.BU_err = torch.squeeze(torch.tensor(np.zeros(shape = (higherlayer_dim, 1)))) # it shouldn't matter what we initialize this to; it will be determined by TD_err in all other iterations
+        self.TD_err = torch.squeeze(torch.tensor(np.zeros(shape = (thislayer_dim, 1)), dtype = torch.float32))
+        self.BU_err = torch.squeeze(torch.tensor(np.zeros(shape = (higherlayer_dim, 1)), dtype = torch.float32)) # it shouldn't matter what we initialize this to; it will be determined by TD_err in all other iterations
         self.W = nn.Linear(thislayer_dim,higherlayer_dim)# maps up to the next layer
     def forward(self, state_, recon_):
         self.timestep += 1
@@ -105,7 +107,7 @@ class PredCells(nn.Module): # does this need to be an nn.Module?
                     self.st_units[lyr].forward(self.err_units[lyr-1].BU_err\
                                                   , self.err_units[lyr].TD_err)
                 if lyr < self.num_layers - 1:
-                    self.err_units[lyr].forward(self.st_units[lyr].state_, self.st_units[lyr+1].recon_)
+                    self.err_units[lyr].forward(self.st_units[lyr].state, self.st_units[lyr+1].recon)
                 else:
                     pass
                 loss += torch.sum(self.err_units[lyr].TD_err)
@@ -113,7 +115,17 @@ class PredCells(nn.Module): # does this need to be an nn.Module?
                 
                 
     
-
+def init_vars(predcell):
+    for lyr in range(predcell.num_layers):
+        state_shape = predcell.st_units[lyr].state.shape
+        recon_shape = predcell.st_units[lyr].recon.shape
+        predcell.st_units[lyr].state = torch.squeeze(torch.tensor(np.zeros(shape = state_shape), dtype = torch.float32))
+        predcell.st_units[lyr].recon = torch.squeeze(torch.tensor(np.zeros(shape = recon_shape), dtype = torch.float32))
+        BU_shape = predcell.err_units[lyr].BU_err.shape
+        predcell.err_units[lyr].BU_err = torch.squeeze(torch.tensor(np.zeros(shape = BU_shape), dtype = torch.float32))
+        TD_shape = predcell.err_units[lyr].TD_err.shape
+        predcell.err_units[lyr].TD_err = torch.squeeze(torch.tensor(np.zeros(shape = TD_shape), dtype = torch.float32))
+        
                 
             
 
@@ -161,12 +173,16 @@ training_loss = []
 optimizer = torch.optim.Adam(trainable_params)
 num_epochs = 1000
 for epoch in range(num_epochs):
-    for sentence in x:
+    for idx, sentence in enumerate(x):
+        #with autograd.detect_anomaly():
+        #torch.autograd.set_detect_anomaly(True)
+        if idx > 0:
+            init_vars(PredCell)
         loss = PredCell.forward(sentence)
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
         training_loss.append(loss.detach().item())
+        print("processed sentence number {} in epoch {} with loss {}".format(idx, epoch, training_loss[-1]))
         
-
 
