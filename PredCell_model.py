@@ -1,6 +1,5 @@
 ''' Authors - Samer Nour Eddine (snoure01@tufts.edu), Apurva Kalia (apurva.kalia@tufts.edu)
 IN PROGRESS
-
 '''
 '''
 '''
@@ -15,7 +14,9 @@ import string
 import io
 import pdb
 from torch import autograd
+from torch.utils.tensorboard import SummaryWriter
 
+writer = SummaryWriter(f'runs/testPredCell/tryingout_tensorboard')
 class StateUnit(nn.Module):
     def __init__(self, layer_level, timestep,thislayer_dim,lowerlayer_dim,isTopLayer = False):
         super().__init__()
@@ -37,7 +38,7 @@ class StateUnit(nn.Module):
             tmp = torch.unsqueeze(tmp, 0)
             #tmp = torch.tensor(tmp, dtype = torch.float32)
             temp, _ = self.LSTM_(tmp)
-            self.state_ = torch.squeeze(temp)
+            self.state = torch.squeeze(temp)
         else:
             tmp = torch.unsqueeze(torch.cat((BU_err, TD_err), axis = 0),0)
             tmp = torch.unsqueeze(tmp, 0)
@@ -47,6 +48,7 @@ class StateUnit(nn.Module):
         self.recon = self.V(self.state)
     def set_state(self,input_char):
         self.state = input_char
+
         
 
         
@@ -60,15 +62,17 @@ class ErrorUnit(nn.Module):
         self.W = nn.Linear(thislayer_dim,higherlayer_dim)# maps up to the next layer
     def forward(self, state_, recon_):
         self.timestep += 1
-        self.TD_err = torch.abs(state_ - recon_)
+        #self.TD_err = torch.abs(state_ - recon_)
+        self.TD_err = state_ - recon_
         self.BU_err = self.W(self.TD_err.float())
     def get_timestep():
         return self.timestep
     def get_TD_err():
         return self.TD_err
         
-class PredCells(nn.Module): # does this need to be an nn.Module?
+class PredCells(nn.Module):
     def __init__(self, num_layers, total_timesteps, hidden_dim):
+        super().__init__()
         self.num_layers = num_layers
         self.numchars = 56
         self.total_timesteps = total_timesteps
@@ -92,8 +96,13 @@ class PredCells(nn.Module): # does this need to be an nn.Module?
                 
                 
 
-    def forward(self, input_sentence):
+    def forward(self, input_sentence,iternumber):
         loss = 0
+        lambda1= 0.0001
+        lambda2 = 0.01
+        if iternumber == 2990:
+            pass
+            stp = 0
         for t in range(self.total_timesteps):
             # input_char at each t is a one-hot character encoding
             input_char = input_sentence[t] # 56 dim one hot vector
@@ -110,7 +119,10 @@ class PredCells(nn.Module): # does this need to be an nn.Module?
                     self.err_units[lyr].forward(self.st_units[lyr].state, self.st_units[lyr+1].recon)
                 else:
                     pass
-                loss += torch.sum(self.err_units[lyr].TD_err)
+                if iternumber <= 1000:
+                    loss = loss + torch.sum(torch.abs(self.err_units[lyr].TD_err))*(lambda1**(lyr)) # assign much less importance to errors at higher layers
+                if iternumber> 1000:
+                    loss = loss + torch.sum(torch.abs(self.err_units[lyr].TD_err))*lambda2**(lyr) # assign a bit less importance to higher layers
         return loss
                 
                 
@@ -145,8 +157,8 @@ char_indices = dict((c, i) for i, c in enumerate(chars))
 indices_char = dict((i, c) for i, c in enumerate(chars))
 
 # cut the text in semi-redundant sequences of maxlen characters
-maxlen = 40
-step = 3
+maxlen = 10 #40
+step = 2
 sentences = []
 next_chars = []
 for i in range(0, len(text) - maxlen, step):
@@ -171,18 +183,37 @@ trainable_params = trainable_st_params + trainable_err_params
 
 training_loss = []
 optimizer = torch.optim.Adam(trainable_params)
-num_epochs = 1000
+num_epochs = 3000
+stopcode = False
+PATH = r'C:\Users\Samer Nour Eddine\Downloads\XAI\state_dict_model_trial.pt'
+stp = False
+step = 0
 for epoch in range(num_epochs):
-    for idx, sentence in enumerate(x):
-        #with autograd.detect_anomaly():
-        #torch.autograd.set_detect_anomaly(True)
-        if idx > 0:
-            init_vars(PredCell)
-        loss = PredCell.forward(sentence)
+    for idx, sentence in enumerate(x[:100]):
+        init_vars(PredCell)
+        loss = PredCell.forward(sentence,epoch)
+        #loss.retain_grad() # tried this to see if we would see the gradients, but no luck...
         loss.backward()
+        torch.nn.utils.clip_grad_norm(trainable_params, max_norm = 1) # prevents exploding gradient
         optimizer.step()
+        for i,j in enumerate(trainable_err_params): 
+            writer.add_histogram('error_weights'+str(i), j,global_step = step)
+        for i,j in enumerate(trainable_st_params):
+            writer.add_histogram('st_weights'+str(i), j,global_step = step)
+        #writer.add_histogram('state gradient', trainable_st_params[0].grad,global_step = step) # this is throwing an error
         optimizer.zero_grad()
         training_loss.append(loss.detach().item())
+        if training_loss[-1] < 2:
+            stp = True
+##        if idx%1000 == 0:
+##            torch.save({
+##            'epoch': epoch,
+##            'model_state_dict': PredCell.state_dict(),
+##            'optimizer_state_dict': optimizer.state_dict(),
+##            'loss': loss,
+##            }, PATH)
+# for some reason, saving a checkpoint does not work as intended. The checkpoint is saved, but when training is resumed, everything is off...
+        writer.add_scalar('Training Loss',loss,global_step = step)
+        step += 1
         print("processed sentence number {} in epoch {} with loss {}".format(idx, epoch, training_loss[-1]))
-        
-
+debug = 0
